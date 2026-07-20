@@ -1,0 +1,63 @@
+(ns association-facts-test
+  (:require [clojure.java.io :as io] [clojure.java.shell :as shell]
+            [clojure.test :refer [deftest is testing]]
+            [kotoba.compiler.core :as compiler] [kotoba.compiler.ir :as ir]))
+(def source (slurp "src/association_facts.kotoba"))
+(defn call [kir function & args] (ir/execute kir function (vec args)))
+(defn present [option] (when (second option) (nth option 2)))
+(def fields ["id" "title" "association" "isic" "country" "kind" "url"
+             "url-provenance" "last-revised-date" "retrieved-at"])
+(def expected
+  [{"id" "phrma.code-on-interactions-with-hcps"
+    "title" "Code on Interactions with Health Care Professionals"
+    "association" "phrma" "isic" "2100" "country" "USA" "kind" "self-regulatory-code"
+    "url" "https://cdn.aglty.io/phrma/global/resources/PhRMA%20Code%20-%20Final.pdf"
+    "url-provenance" "official-association-site" "last-revised-date" "2022-01-01"
+    "retrieved-at" "2026-07-15"}
+   {"id" "phrma.guiding-principles-dtc-advertising"
+    "title" "PhRMA Guiding Principles: Direct to Consumer Advertisements about Prescription Medicines"
+    "association" "phrma" "isic" "2100" "country" "USA" "kind" "self-regulatory-code"
+    "url" "https://cdn.aglty.io/phrma/global/resources/PhRMA_Guiding_Principles_2018.pdf"
+    "url-provenance" "official-association-site" "last-revised-date" "2018"
+    "retrieved-at" "2026-07-15"}])
+
+(deftest reference-preserves-fields-date-precision-and-topics
+  (let [kir (:kir (compiler/compile-source source :js-kotoba-v1))
+        observed (mapv (fn [i] (into {} (map (fn [f] [f (present (call kir 'entry-field "phrma" i f))]) fields))) [0 1])]
+    (is (= expected observed))
+    (is (= ["2022-01-01" "2018"] (mapv #(present (call kir 'entry-field "phrma" % "last-revised-date")) [0 1])))
+    (is (= [2 2] (mapv #(call kir 'topic-count "phrma" %) [0 1])))
+    (is (= [["ethics" "member-conduct"] ["advertising" "consumer-protection"]]
+           (mapv (fn [i] (mapv #(present (call kir 'topic "phrma" i %)) [0 1])) [0 1])))
+    (is (= "phrma.guiding-principles-dtc-advertising"
+           (present (call kir 'by-topic-id "phrma" "consumer-protection" 0))))
+    (is (= #{} (set (:effects kir))))
+    (testing "unknown values and invalid indexes fail closed"
+      (is (zero? (call kir 'entry-count "efpia")))
+      (is (nil? (present (call kir 'entry-field "phrma" -1 "id"))))
+      (is (nil? (present (call kir 'entry-field "phrma" 2 "id"))))
+      (is (nil? (present (call kir 'entry-field "phrma" 0 "unknown"))))
+      (is (nil? (present (call kir 'topic "phrma" 1 2))))
+      (is (zero? (call kir 'by-topic-count "phrma" "labor")))
+      (is (nil? (present (call kir 'by-topic-id "phrma" "advertising" 1)))))))
+
+(defn compiler-root []
+  (nth (iterate #(.getParent ^java.nio.file.Path %)
+                (java.nio.file.Path/of (.toURI (io/resource "kotoba/compiler/core.clj")))) 4))
+(defn base64 [value] (.encodeToString (java.util.Base64/getEncoder) value))
+(deftest restricted-javascript-and-typed-wasm-conform-semantically
+  (let [javascript (compiler/compile-source source :js-kotoba-v1)
+        wasm (compiler/compile-source source :wasm32-browser-kotoba-v1)
+        js64 (base64 (.getBytes ^String (:source javascript) "UTF-8")) wasm64 (base64 ^bytes (:bytes wasm))
+        probe (shell/sh "node" "--input-type=module" "-e"
+                (str "import(process.argv[1]).then(async host=>{const j=await import('data:text/javascript;base64," js64 "');"
+                     "const w=await host.instantiateKotoba(Buffer.from(process.argv[2],'base64'));const run=x=>{"
+                     "if(x['entry-count']('phrma')!==2n||x['entry-field']('phrma',0n,'last-revised-date')[2]!=='2022-01-01'||x['entry-field']('phrma',1n,'last-revised-date')[2]!=='2018')throw Error('dates');"
+                     "if(x['topic-count']('phrma',0n)!==2n||x['topic']('phrma',1n,1n)[2]!=='consumer-protection')throw Error('topics');"
+                     "if(x['by-topic-id']('phrma','ethics',0n)[2]!=='phrma.code-on-interactions-with-hcps'||x['topic']('phrma',1n,2n)[1]!==false)throw Error('query');};"
+                     "run(j.instantiateKotoba({}));run(w.instance.exports);}).catch(e=>{console.error(e);process.exit(99)})")
+                (.toString (.toUri (.resolve (compiler-root) "runtime/browser-host.mjs"))) wasm64)]
+    (is (zero? (:exit probe)) (str (:out probe) (:err probe)))))
+(deftest production-source-authority
+  (is (= ["src/association_facts.kotoba"]
+         (->> (file-seq (io/file "src")) (filter #(.isFile %)) (map str) sort vec))))
