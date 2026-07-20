@@ -1,0 +1,79 @@
+(ns association-facts
+  (:export [main association-covered? entry-count entry-field topic-count
+            topic by-topic-count by-topic-id coverage-note]))
+
+(defn association-covered? [association :string] :i64
+  (string=? association "phrma"))
+(defn entry-count [association :string] :i64
+  (if (association-covered? association) 2 0))
+(defn valid-entry? [association :string index :i64] :i64
+  (if (association-covered? association)
+    (if (= index 0) 1 (if (= index 1) 1 0)) 0))
+
+(defn entry-field [association :string index :i64 field :string]
+  [:option :string]
+  (if (valid-entry? association index)
+    (if (= index 0)
+      (cond
+        (string=? field "id") (option-some-of [:option :string] "phrma.code-on-interactions-with-hcps")
+        (string=? field "title") (option-some-of [:option :string] "Code on Interactions with Health Care Professionals")
+        (string=? field "association") (option-some-of [:option :string] "phrma")
+        (string=? field "isic") (option-some-of [:option :string] "2100")
+        (string=? field "country") (option-some-of [:option :string] "USA")
+        (string=? field "kind") (option-some-of [:option :string] "self-regulatory-code")
+        (string=? field "url") (option-some-of [:option :string] "https://cdn.aglty.io/phrma/global/resources/PhRMA%20Code%20-%20Final.pdf")
+        (string=? field "url-provenance") (option-some-of [:option :string] "official-association-site")
+        (string=? field "last-revised-date") (option-some-of [:option :string] "2022-01-01")
+        (string=? field "retrieved-at") (option-some-of [:option :string] "2026-07-15")
+        :else (option-none-of [:option :string]))
+      (cond
+        (string=? field "id") (option-some-of [:option :string] "phrma.guiding-principles-dtc-advertising")
+        (string=? field "title") (option-some-of [:option :string] "PhRMA Guiding Principles: Direct to Consumer Advertisements about Prescription Medicines")
+        (string=? field "association") (option-some-of [:option :string] "phrma")
+        (string=? field "isic") (option-some-of [:option :string] "2100")
+        (string=? field "country") (option-some-of [:option :string] "USA")
+        (string=? field "kind") (option-some-of [:option :string] "self-regulatory-code")
+        (string=? field "url") (option-some-of [:option :string] "https://cdn.aglty.io/phrma/global/resources/PhRMA_Guiding_Principles_2018.pdf")
+        (string=? field "url-provenance") (option-some-of [:option :string] "official-association-site")
+        (string=? field "last-revised-date") (option-some-of [:option :string] "2018")
+        (string=? field "retrieved-at") (option-some-of [:option :string] "2026-07-15")
+        :else (option-none-of [:option :string])))
+    (option-none-of [:option :string])))
+
+(defn topic-count [association :string index :i64] :i64
+  (if (valid-entry? association index) 2 0))
+(defn topic [association :string index :i64 topic-index :i64]
+  [:option :string]
+  (if (valid-entry? association index)
+    (if (= index 0)
+      (if (= topic-index 0) (option-some-of [:option :string] "ethics")
+          (if (= topic-index 1) (option-some-of [:option :string] "member-conduct")
+              (option-none-of [:option :string])))
+      (if (= topic-index 0) (option-some-of [:option :string] "advertising")
+          (if (= topic-index 1) (option-some-of [:option :string] "consumer-protection")
+              (option-none-of [:option :string]))))
+    (option-none-of [:option :string])))
+
+(defn by-topic-count [association :string candidate :string] :i64
+  (if (association-covered? association)
+    (if (string=? candidate "ethics") 1
+        (if (string=? candidate "member-conduct") 1
+            (if (string=? candidate "advertising") 1
+                (if (string=? candidate "consumer-protection") 1 0)))) 0))
+(defn by-topic-id [association :string candidate :string index :i64]
+  [:option :string]
+  (if (association-covered? association)
+    (if (= index 0)
+      (if (string=? candidate "ethics") (entry-field association 0 "id")
+          (if (string=? candidate "member-conduct") (entry-field association 0 "id")
+              (if (string=? candidate "advertising") (entry-field association 1 "id")
+                  (if (string=? candidate "consumer-protection") (entry-field association 1 "id")
+                      (option-none-of [:option :string])))))
+      (option-none-of [:option :string]))
+    (option-none-of [:option :string])))
+(defn coverage-note [association :string] [:option :string]
+  (if (association-covered? association)
+    (option-some-of [:option :string]
+      "cloud-itonami-assoc-2100-usa-phrma Wave 0 (ADR-2607141700): 2 phrma entries seeded with official PhRMA citations. Extend the sovereign catalog; never fabricate a rule id/url.")
+    (option-none-of [:option :string])))
+(defn main [] :i64 0)
